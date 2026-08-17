@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -36,15 +35,76 @@ with st.sidebar:
     furnishing = st.number_input("Furnishing / setup cash", 0, 30000, 5000, 250)
 
 st.subheader(f"🔎 Screen candidate rentals in {city}")
-st.write("You can paste candidate properties here or upload a CSV. The app does not scrape Zillow/Airbnb.")
+st.write("Add a property manually below, or upload a CSV with multiple properties. The app does not scrape Zillow/Airbnb yet.")
 
+# Manual property entry
+if "manual_properties" not in st.session_state:
+    st.session_state.manual_properties = []
+
+with st.expander("➕ Add a property manually", expanded=True):
+    with st.form("manual_property_form", clear_on_submit=True):
+        c1, c2 = st.columns(2)
+        with c1:
+            property_name = st.text_input("Property name", placeholder="3BR Apartment")
+            address = st.text_input("Address", placeholder="123 Main St, Silver Spring, MD")
+            rent = st.number_input("Monthly rent ($)", min_value=0, value=2200, step=50)
+            beds = st.number_input("Bedrooms", min_value=0, value=3, step=1)
+            baths = st.number_input("Bathrooms", min_value=0.0, value=2.0, step=0.5)
+        with c2:
+            adr = st.number_input("Estimated nightly rate / ADR ($)", min_value=0, value=150, step=5)
+            occupancy_pct = st.number_input("Estimated occupancy (%)", min_value=0, max_value=100, value=65, step=1)
+            bookings = st.number_input("Bookings per month", min_value=0, value=8, step=1)
+            cleaning_fee = st.number_input("Cleaning fee charged per booking ($)", min_value=0, value=100, step=10)
+            cleaning_cost = st.number_input("Cleaning cost per booking ($)", min_value=0, value=60, step=10)
+        permission = st.selectbox("Landlord / STR permission", ["Unknown", "Yes", "No"])
+        submitted = st.form_submit_button("➕ Add Property", use_container_width=True)
+
+        if submitted:
+            if not property_name.strip():
+                st.error("Enter a property name first.")
+            else:
+                st.session_state.manual_properties.append({
+                    "Property": property_name.strip(),
+                    "Address": address.strip(),
+                    "Rent": rent,
+                    "Beds": beds,
+                    "Baths": baths,
+                    "ADR": adr,
+                    "Occupancy": occupancy_pct / 100,
+                    "Bookings": bookings,
+                    "CleaningFee": cleaning_fee,
+                    "CleaningCost": cleaning_cost,
+                    "Permission": permission,
+                })
+                st.success(f"Added {property_name.strip()} to the analysis.")
+
+if st.session_state.manual_properties:
+    st.write("**Manually added properties:**")
+    manual_preview = pd.DataFrame(st.session_state.manual_properties)
+    manual_preview["Occupancy"] = manual_preview["Occupancy"].map(lambda x: f"{x:.0%}")
+    st.dataframe(manual_preview, use_container_width=True, hide_index=True)
+
+st.divider()
+
+# CSV upload
+st.subheader("📄 Upload candidate properties")
 template = pd.DataFrame([
     ["Example 4BR House","",2440,4,2,180,0.65,8,120,100,"Unknown"],
     ["Example 4BR Townhouse","",2400,4,3,170,0.62,8,120,100,"Unknown"],
 ], columns=["Property","Address","Rent","Beds","Baths","ADR","Occupancy","Bookings","CleaningFee","CleaningCost","Permission"])
 
 uploaded = st.file_uploader("Upload candidate properties (.csv)", type=["csv"])
-df = pd.read_csv(uploaded) if uploaded else template.copy()
+
+if uploaded:
+    df = pd.read_csv(uploaded)
+    st.success(f"Loaded {len(df)} properties from {uploaded.name}.")
+else:
+    df = template.copy()
+
+# Add manually entered properties to the current dataset
+if st.session_state.manual_properties:
+    manual_df = pd.DataFrame(st.session_state.manual_properties)
+    df = pd.concat([df, manual_df], ignore_index=True)
 
 required = ["Property","Rent","Beds","Baths","ADR","Occupancy","Bookings","CleaningFee","CleaningCost","Permission"]
 missing = [c for c in required if c not in df.columns]
@@ -54,6 +114,10 @@ if missing:
 
 for c in ["Rent","Beds","Baths","ADR","Occupancy","Bookings","CleaningFee","CleaningCost"]:
     df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
+
+# Normalize occupancy if a CSV uses percentages such as 65 instead of 0.65
+if (df["Occupancy"] > 1).any():
+    df.loc[df["Occupancy"] > 1, "Occupancy"] = df.loc[df["Occupancy"] > 1, "Occupancy"] / 100
 
 DAYS = 30.4
 
